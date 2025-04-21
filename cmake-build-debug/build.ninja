@@ -91,7 +91,7 @@ build CMakeFiles/CppLoadTester.dir/src/UIManager.cpp.obj: CXX_COMPILER__CppLoadT
 
 build CppLoadTester.exe: CXX_EXECUTABLE_LINKER__CppLoadTester_Debug CMakeFiles/CppLoadTester.dir/src/main.cpp.obj CMakeFiles/CppLoadTester.dir/src/LoadTester.cpp.obj CMakeFiles/CppLoadTester.dir/src/AppConfig.cpp.obj CMakeFiles/CppLoadTester.dir/src/UIManager.cpp.obj | C$:/Users/10929/.vcpkg-clion/vcpkg/installed/x64-windows/debug/lib/libcurl-d.lib
   FLAGS = -g
-  LINK_FLAGS = -mwindows  -mwindows
+  LINK_FLAGS = -mwindows -static-libgcc -static-libstdc++  -mwindows
   LINK_LIBRARIES = -lwsock32  -lws2_32  -lcomctl32  -lshlwapi  C:/Users/10929/.vcpkg-clion/vcpkg/installed/x64-windows/debug/lib/libcurl-d.lib  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
   OBJECT_DIR = CMakeFiles\CppLoadTester.dir
   POST_BUILD = C:\Windows\system32\cmd.exe /C "cd /D C:\Users\10929\jmeter-cpp\cmake-build-debug && "C:\Program Files\PowerShell\7\pwsh.exe" -noprofile -executionpolicy Bypass -file C:/Users/10929/.vcpkg-clion/vcpkg/scripts/buildsystems/msbuild/applocal.ps1 -targetBinary C:/Users/10929/jmeter-cpp/cmake-build-debug/CppLoadTester.exe -installedDir C:/Users/10929/.vcpkg-clion/vcpkg/installed/x64-windows/debug/bin -OutVariable out"

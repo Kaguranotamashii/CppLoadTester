@@ -1,10 +1,10 @@
 "D:\development_tool\CLion 2025.1\bin\cmake\win\x64\bin\cmake.exe" -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_MAKE_PROGRAM=D:/development_tool/CLion 2025.1/bin/ninja/win/x64/ninja.exe" -DCMAKE_TOOLCHAIN_FILE=C:\Users\10929\.vcpkg-clion\vcpkg\scripts\buildsystems\vcpkg.cmake -G Ninja -S C:\Users\10929\jmeter-cpp -B C:\Users\10929\jmeter-cpp\cmake-build-debug
--- CURL found and will be linked as a target.
+-- CURL找到并将使用CURL::libcurl目标链接。
 -- 配置信息:
 --   生成器: Ninja
 --   构建类型: Debug
 --   CURL库: 已找到并将使用CURL::libcurl目标
 --   vcpkg工具链: C:\Users\10929\.vcpkg-clion\vcpkg\scripts\buildsystems\vcpkg.cmake
--- Configuring done (0.2s)
--- Generating done (0.0s)
+-- Configuring done (0.3s)
+-- Generating done (0.1s)
 -- Build files have been written to: C:/Users/10929/jmeter-cpp/cmake-build-debug

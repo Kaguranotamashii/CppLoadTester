@@ -1,7 +1,9 @@
 # ninja log v6
-24	3829	7669430212819956	CMakeFiles/CppLoadTester.dir/src/UIManager.cpp.obj	6d52f2783aff3855
+18	4758	7669444665838260	CMakeFiles/CppLoadTester.dir/src/UIManager.cpp.obj	6d52f2783aff3855
 25	1037	7669428329024923	CMakeFiles/CppLoadTester.dir/src/AppConfig.cpp.obj	c379ac2c909af6d9
-6	2483	7669430212643442	CMakeFiles/CppLoadTester.dir/src/main.cpp.obj	ab548afad92126b5
-16	2921	7669430212738557	CMakeFiles/CppLoadTester.dir/src/LoadTester.cpp.obj	71d77f1607c5e1b6
-4	347	7669430678515971	build.ninja	f6f2cf5aa9d60f36
-6	2772	7669430678952822	CppLoadTester.exe	ee79160888f2af67
+10	2959	7669447935020929	CMakeFiles/CppLoadTester.dir/src/main.cpp.obj	ab548afad92126b5
+20	5264	7669443111644332	CMakeFiles/CppLoadTester.dir/src/LoadTester.cpp.obj	71d77f1607c5e1b6
+4	347	7669448291090459	build.ninja	f6f2cf5aa9d60f36
+2960	6886	7669447964511854	CppLoadTester.exe	45240daafd94d089
+11	3765	7669450276140655	CMakeFiles/CppLoadTester.dir/src/UIManager.cpp.obj	6d52f2783aff3855
+3770	6874	7669450313723303	CppLoadTester.exe	45240daafd94d089
