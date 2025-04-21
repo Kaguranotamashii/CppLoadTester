@@ -10,11 +10,15 @@
 #include <CommCtrl.h>
 #include <shobjidl.h>
 #include <shlwapi.h>
-#include <ShlObj.h>  // 添加此头文件，包含SHGetFolderPathW函数
+#include <ShlObj.h>
+#include <richedit.h>
+#include <algorithm>
+
+#include "StringConversion.h"
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "shlwapi.lib")
-#pragma comment(lib, "Shell32.lib")  // 添加此库，用于SHGetFolderPathW
+#pragma comment(lib, "Shell32.lib")
 
 // 控件ID
 #define ID_URL_COMBO         101
@@ -29,9 +33,25 @@
 #define ID_STATUS_LABEL      110
 #define ID_SUCCESS_RATE_LABEL 111
 #define ID_RESPONSE_TIME_LABEL 112
+#define ID_REQUEST_LIST      113
+#define ID_VIEW_LOG_BUTTON   114
+#define ID_CHART_STATIC      115
+
+// 对话框IDs
+#define IDD_LOG_DIALOG      1001
+#define ID_LOG_EDIT         1002
+#define ID_LOG_CLOSE        1003
+
+// 列表视图列ID
+#define COL_ID              0
+#define COL_STATUS          1
+#define COL_CODE            2
+#define COL_TIME            3
+#define COL_URL             4
 
 // 窗口类名
 #define WINDOW_CLASS_NAME    L"CppLoadTesterWindowClass"
+#define LOG_DIALOG_CLASS     L"CppLoadTesterLogDialog"
 
 // 静态实例指针，用于窗口过程回调
 UIManager* UIManager::instance = nullptr;
@@ -66,7 +86,7 @@ bool UIManager::initialize() {
     // 初始化通用控件
     INITCOMMONCONTROLSEX icc;
     icc.dwSize = sizeof(INITCOMMONCONTROLSEX);
-    icc.dwICC = ICC_BAR_CLASSES | ICC_STANDARD_CLASSES;
+    icc.dwICC = ICC_BAR_CLASSES | ICC_STANDARD_CLASSES | ICC_LISTVIEW_CLASSES;
     InitCommonControlsEx(&icc);
 
     // 注册窗口类
@@ -87,8 +107,17 @@ bool UIManager::initialize() {
         PostMessage(hwndMain, WM_USER, 0, 0);
     });
 
+    // 设置请求结果回调
+    tester.setRequestCallback([this](const RequestResult& result) {
+        // 发送请求结果到UI线程
+        PostMessage(hwndMain, WM_USER + 1, reinterpret_cast<WPARAM>(new RequestResult(result)), 0);
+    });
+
     // 加载配置
     loadSavedConfig();
+
+    // 初始化列表视图
+    initializeListView();
 
     return true;
 }
@@ -120,6 +149,16 @@ void UIManager::updateStatus(int completed, int total, double successRate) {
     wss.str(L"");
     wss << L"成功率: " << std::fixed << std::setprecision(2) << successRate << L"%";
     SetWindowTextW(hwndSuccessRateLabel, wss.str().c_str());
+
+    // 更新响应时间标签
+    wss.str(L"");
+    wss << L"响应时间: 最小=" << std::fixed << std::setprecision(2) << tester.getMinResponseTime()
+        << L"ms, 平均=" << tester.getAvgResponseTime()
+        << L"ms, 最大=" << tester.getMaxResponseTime() << L"ms";
+    SetWindowTextW(hwndResponseTimeLabel, wss.str().c_str());
+
+    // 重绘图表区域
+    InvalidateRect(hwndChartStatic, NULL, TRUE);
 }
 
 bool UIManager::createMainWindow() {
@@ -130,7 +169,7 @@ bool UIManager::createMainWindow() {
         L"C++ 负载测试工具",            // 窗口标题
         WS_OVERLAPPEDWINDOW,            // 窗口风格
         CW_USEDEFAULT, CW_USEDEFAULT,   // 初始位置
-        600, 400,                       // 初始大小
+        800, 650,                       // 初始大小(增大了)
         NULL, NULL,                     // 父窗口和菜单句柄
         hInstance,                      // 应用程序实例
         NULL                            // 创建参数
@@ -163,7 +202,7 @@ bool UIManager::createControls() {
     hwndUrlCombo = CreateWindowW(
         WC_COMBOBOXW, L"",
         WS_CHILD | WS_VISIBLE | CBS_DROPDOWN | CBS_HASSTRINGS | WS_VSCROLL,
-        110, y, 350, 200,
+        110, y, 450, 200,  // 增加宽度
         hwndMain, (HMENU)ID_URL_COMBO, hInstance, NULL
     );
 
@@ -211,7 +250,7 @@ bool UIManager::createControls() {
     hwndLogFileEdit = CreateWindowW(
         L"EDIT", L"loadtest.log",
         WS_CHILD | WS_VISIBLE | WS_BORDER,
-        110, y, 300, 22,
+        110, y, 350, 22,
         hwndMain, (HMENU)ID_LOG_FILE_EDIT, hInstance, NULL
     );
 
@@ -219,8 +258,16 @@ bool UIManager::createControls() {
     CreateWindowW(
         L"BUTTON", L"浏览...",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        420, y, 60, 22,
+        470, y, 60, 22,
         hwndMain, (HMENU)ID_BROWSE_BUTTON, hInstance, NULL
+    );
+
+    // 添加查看日志按钮
+    hwndViewLogButton = CreateWindowW(
+        L"BUTTON", L"查看日志",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        540, y, 80, 22,
+        hwndMain, (HMENU)ID_VIEW_LOG_BUTTON, hInstance, NULL
     );
 
     // 按钮
@@ -251,7 +298,7 @@ bool UIManager::createControls() {
     hwndProgressBar = CreateWindowW(
         PROGRESS_CLASSW, NULL,
         WS_CHILD | WS_VISIBLE | PBS_SMOOTH,
-        110, y, 350, 20,
+        110, y, 450, 20,  // 增加宽度
         hwndMain, (HMENU)ID_PROGRESS_BAR, hInstance, NULL
     );
     SendMessage(hwndProgressBar, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
@@ -261,7 +308,7 @@ bool UIManager::createControls() {
     hwndStatusLabel = CreateWindowW(
         L"STATIC", L"就绪",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
-        110, y, 350, 22,
+        110, y, 450, 22,  // 增加宽度
         hwndMain, (HMENU)ID_STATUS_LABEL, hInstance, NULL
     );
 
@@ -270,7 +317,7 @@ bool UIManager::createControls() {
     hwndSuccessRateLabel = CreateWindowW(
         L"STATIC", L"成功率: 0.00%",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
-        110, y, 350, 22,
+        110, y, 450, 22,  // 增加宽度
         hwndMain, (HMENU)ID_SUCCESS_RATE_LABEL, hInstance, NULL
     );
 
@@ -279,18 +326,332 @@ bool UIManager::createControls() {
     hwndResponseTimeLabel = CreateWindowW(
         L"STATIC", L"响应时间: 最小=0ms, 平均=0ms, 最大=0ms",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
-        110, y, 350, 22,
+        110, y, 450, 22,  // 增加宽度
         hwndMain, (HMENU)ID_RESPONSE_TIME_LABEL, hInstance, NULL
+    );
+
+    // 添加请求列表视图
+    y += 40;
+    CreateWindowW(
+        L"STATIC", L"最近请求:",
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        20, y, 450, 22,
+        hwndMain, NULL, hInstance, NULL
+    );
+
+    y += 25;
+    hwndRequestListView = CreateWindowW(
+        WC_LISTVIEWW, L"",
+        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | WS_BORDER | LVS_NOSORTHEADER,
+        20, y, 740, 150,  // 宽列表
+        hwndMain, (HMENU)ID_REQUEST_LIST, hInstance, NULL
+    );
+
+    // 添加响应时间图表区域
+    y += 160;
+    CreateWindowW(
+        L"STATIC", L"响应时间图表:",
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        20, y, 450, 22,
+        hwndMain, NULL, hInstance, NULL
+    );
+
+    y += 25;
+    hwndChartStatic = CreateWindowW(
+        L"STATIC", L"",
+        WS_CHILD | WS_VISIBLE | SS_OWNERDRAW | WS_BORDER,
+        20, y, 740, 150,  // 图表区域
+        hwndMain, (HMENU)ID_CHART_STATIC, hInstance, NULL
     );
 
     // 设置字体
     for (HWND hwnd : {hwndUrlCombo, hwndThreadsEdit, hwndRequestsEdit, hwndLogFileEdit,
-                      hwndStartButton, hwndStopButton, hwndExitButton,
+                      hwndStartButton, hwndStopButton, hwndExitButton, hwndViewLogButton,
                       hwndStatusLabel, hwndSuccessRateLabel, hwndResponseTimeLabel}) {
         SendMessage(hwnd, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(TRUE, 0));
     }
 
     return true;
+}
+
+void UIManager::initializeListView() {
+    // 启用扩展样式
+    ListView_SetExtendedListViewStyle(hwndRequestListView, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+
+    // 添加列
+    LVCOLUMNW lvc = {0};
+    lvc.mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
+    lvc.fmt = LVCFMT_LEFT;
+
+    // ID列
+    lvc.iSubItem = COL_ID;
+    lvc.pszText = const_cast<LPWSTR>(L"ID");
+    lvc.cx = 50;
+    ListView_InsertColumn(hwndRequestListView, COL_ID, &lvc);
+
+    // 状态列
+    lvc.iSubItem = COL_STATUS;
+    lvc.pszText = const_cast<LPWSTR>(L"状态");
+    lvc.cx = 80;
+    ListView_InsertColumn(hwndRequestListView, COL_STATUS, &lvc);
+
+    // 状态码列
+    lvc.iSubItem = COL_CODE;
+    lvc.pszText = const_cast<LPWSTR>(L"状态码");
+    lvc.cx = 70;
+    ListView_InsertColumn(hwndRequestListView, COL_CODE, &lvc);
+
+    // 响应时间列
+    lvc.iSubItem = COL_TIME;
+    lvc.pszText = const_cast<LPWSTR>(L"响应时间(ms)");
+    lvc.cx = 120;
+    ListView_InsertColumn(hwndRequestListView, COL_TIME, &lvc);
+
+    // URL列
+    lvc.iSubItem = COL_URL;
+    lvc.pszText = const_cast<LPWSTR>(L"URL");
+    lvc.cx = 400;
+    ListView_InsertColumn(hwndRequestListView, COL_URL, &lvc);
+}
+
+void UIManager::updateListView(const RequestResult& result) {
+    // 将结果添加到最近请求列表
+    {
+        std::lock_guard<std::mutex> lock(requestsMutex);
+        recentRequests.push_front(result);
+
+        // 限制列表大小
+        if (recentRequests.size() > MAX_VISIBLE_REQUESTS) {
+            recentRequests.pop_back();
+        }
+    }
+
+    // 更新列表视图
+    updateListView();
+}
+
+void UIManager::updateListView() {
+    // 清空列表视图
+    ListView_DeleteAllItems(hwndRequestListView);
+
+    std::lock_guard<std::mutex> lock(requestsMutex);
+
+    // 添加项目到列表视图
+    for (size_t i = 0; i < recentRequests.size(); ++i) {
+        const auto& req = recentRequests[i];
+
+        // 创建列表项
+        LVITEMW lvi = {0};
+        lvi.mask = LVIF_TEXT | LVIF_PARAM;
+        lvi.iItem = static_cast<int>(i);
+        lvi.iSubItem = 0;
+
+        // ID列
+        wchar_t idStr[16];
+        swprintf_s(idStr, L"%d", req.id);
+        lvi.pszText = idStr;
+        lvi.lParam = static_cast<LPARAM>(req.id);
+        int itemIndex = ListView_InsertItem(hwndRequestListView, &lvi);
+
+        // 状态列
+        const wchar_t* statusText;
+        switch (req.status) {
+            case RequestStatus::SUCCESS:
+                statusText = L"成功";
+                ListView_SetItemText(hwndRequestListView, itemIndex, COL_STATUS, const_cast<LPWSTR>(statusText));
+                // 设置行颜色为绿色 (通过设置背景色)
+                {
+                    LVITEMW lvItem = {0};
+                    lvItem.mask = LVIF_PARAM;
+                    lvItem.iItem = itemIndex;
+                    lvItem.lParam = RGB(200, 255, 200);  // 浅绿色
+                    ListView_SetItem(hwndRequestListView, &lvItem);
+                }
+                break;
+            case RequestStatus::FAILED:
+                statusText = L"失败";
+                ListView_SetItemText(hwndRequestListView, itemIndex, COL_STATUS, const_cast<LPWSTR>(statusText));
+                // 设置行颜色为橙色
+                {
+                    LVITEMW lvItem = {0};
+                    lvItem.mask = LVIF_PARAM;
+                    lvItem.iItem = itemIndex;
+                    lvItem.lParam = RGB(255, 230, 180);  // 浅橙色
+                    ListView_SetItem(hwndRequestListView, &lvItem);
+                }
+                break;
+            case RequestStatus::REQ_ERROR:
+                statusText = L"错误";
+                ListView_SetItemText(hwndRequestListView, itemIndex, COL_STATUS, const_cast<LPWSTR>(statusText));
+                // 设置行颜色为红色
+                {
+                    LVITEMW lvItem = {0};
+                    lvItem.mask = LVIF_PARAM;
+                    lvItem.iItem = itemIndex;
+                    lvItem.lParam = RGB(255, 200, 200);  // 浅红色
+                    ListView_SetItem(hwndRequestListView, &lvItem);
+                }
+                break;
+        }
+
+        // 状态码列
+        if (req.statusCode > 0) {
+            wchar_t codeStr[16];
+            swprintf_s(codeStr, L"%d", req.statusCode);
+            ListView_SetItemText(hwndRequestListView, itemIndex, COL_CODE, codeStr);
+        } else {
+            ListView_SetItemText(hwndRequestListView, itemIndex, COL_CODE, const_cast<LPWSTR>(L"-"));
+        }
+
+        // 响应时间列
+        wchar_t timeStr[32];
+        swprintf_s(timeStr, L"%.2f", req.responseTime);
+        ListView_SetItemText(hwndRequestListView, itemIndex, COL_TIME, timeStr);
+
+        // URL列 - 使用安全转换
+        std::wstring wUrl = stringToWstring(req.url);
+        ListView_SetItemText(hwndRequestListView, itemIndex, COL_URL, const_cast<LPWSTR>(wUrl.c_str()));
+    }
+}
+
+void UIManager::drawChart(HDC hdc) {
+    // 获取图表区域大小
+    RECT rect;
+    GetClientRect(hwndChartStatic, &rect);
+
+    int width = rect.right - rect.left;
+    int height = rect.bottom - rect.top;
+
+    // 创建白色背景
+    HBRUSH hBrush = CreateSolidBrush(RGB(255, 255, 255));
+    FillRect(hdc, &rect, hBrush);
+    DeleteObject(hBrush);
+
+    // 获取响应时间数据
+    std::vector<double> times = tester.getResponseTimes();
+
+    if (times.empty()) {
+        // 无数据时显示提示
+        SetTextColor(hdc, RGB(100, 100, 100));
+        SetBkMode(hdc, TRANSPARENT);
+        TextOutW(hdc, width / 2 - 80, height / 2 - 10, L"无响应时间数据", 14);
+        return;
+    }
+
+    // 找出最大和最小值
+    double maxTime = *std::max_element(times.begin(), times.end());
+    double minTime = *std::min_element(times.begin(), times.end());
+
+    // 为坐标轴留出空间
+    int leftMargin = 50;
+    int bottomMargin = 30;
+    int rightMargin = 20;
+    int topMargin = 20;
+
+    int chartWidth = width - leftMargin - rightMargin;
+    int chartHeight = height - topMargin - bottomMargin;
+
+    // 绘制坐标轴
+    HPEN axisPen = CreatePen(PS_SOLID, 1, RGB(0, 0, 0));
+    HPEN oldPen = (HPEN)SelectObject(hdc, axisPen);
+
+    // Y轴
+    MoveToEx(hdc, leftMargin, topMargin, NULL);
+    LineTo(hdc, leftMargin, height - bottomMargin);
+
+    // X轴
+    MoveToEx(hdc, leftMargin, height - bottomMargin, NULL);
+    LineTo(hdc, width - rightMargin, height - bottomMargin);
+
+    // 绘制刻度和标签
+    SetTextColor(hdc, RGB(0, 0, 0));
+    SetBkMode(hdc, TRANSPARENT);
+
+    // Y轴刻度
+    for (int i = 0; i <= 5; i++) {
+        int y = height - bottomMargin - (i * chartHeight / 5);
+        double value = minTime + (i * (maxTime - minTime) / 5);
+
+        MoveToEx(hdc, leftMargin - 5, y, NULL);
+        LineTo(hdc, leftMargin, y);
+
+        wchar_t label[16];
+        swprintf_s(label, L"%.1f", value);
+        TextOutW(hdc, leftMargin - 45, y - 10, label, (int)wcslen(label));
+    }
+
+    // X轴刻度 - 显示请求编号
+    int maxDisplayedPoints = std::min(50, (int)times.size());
+    int step = std::max(1, (int)times.size() / maxDisplayedPoints);
+
+    for (int i = 0; i < maxDisplayedPoints; i++) {
+        int index = i * step;
+        if (index >= (int)times.size()) break;
+
+        int x = leftMargin + (i * chartWidth / maxDisplayedPoints);
+
+        MoveToEx(hdc, x, height - bottomMargin, NULL);
+        LineTo(hdc, x, height - bottomMargin + 5);
+
+        if (i % 5 == 0) {  // 只在每5个点绘制标签以避免拥挤
+            wchar_t label[16];
+            swprintf_s(label, L"%d", index + 1);
+            TextOutW(hdc, x - 10, height - bottomMargin + 10, label, (int)wcslen(label));
+        }
+    }
+
+    // 添加轴标签
+    TextOutW(hdc, width / 2 - 30, height - 15, L"请求序号", 10);
+
+    // 旋转文本以绘制Y轴标签
+    LOGFONT logFont = {0};
+    logFont.lfHeight = 14;
+    logFont.lfEscapement = 900;  // 90度旋转
+    wcscpy_s(logFont.lfFaceName, L"宋体");
+    HFONT font = CreateFontIndirect(&logFont);
+    HFONT oldFont = (HFONT)SelectObject(hdc, font);
+
+    TextOutW(hdc, 15, height / 2 - 60, L"响应时间 (毫秒)", 16);
+
+    SelectObject(hdc, oldFont);
+    DeleteObject(font);
+
+    // 绘制数据点和连线
+    HPEN dataPen = CreatePen(PS_SOLID, 2, RGB(0, 120, 215));  // 蓝色
+    SelectObject(hdc, dataPen);
+
+    HBRUSH pointBrush = CreateSolidBrush(RGB(0, 120, 215));
+
+    bool first = true;
+    int prevX = 0, prevY = 0;
+
+    for (int i = 0; i < maxDisplayedPoints; i++) {
+        int index = i * step;
+        if (index >= (int)times.size()) break;
+
+        double value = times[index];
+        int x = leftMargin + (i * chartWidth / maxDisplayedPoints);
+        int y = height - bottomMargin - (int)((value - minTime) * chartHeight / (maxTime - minTime));
+
+        // 绘制点
+        Ellipse(hdc, x - 3, y - 3, x + 3, y + 3);
+
+        // 连线
+        if (!first) {
+            MoveToEx(hdc, prevX, prevY, NULL);
+            LineTo(hdc, x, y);
+        }
+
+        first = false;
+        prevX = x;
+        prevY = y;
+    }
+
+    // 清理
+    SelectObject(hdc, oldPen);
+    DeleteObject(dataPen);
+    DeleteObject(axisPen);
+    DeleteObject(pointBrush);
 }
 
 bool UIManager::registerWindowClass() {
@@ -327,6 +688,14 @@ LRESULT CALLBACK UIManager::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPAR
                 );
             }
             return 0;
+        } else if (uMsg == WM_USER + 1) {
+            // 请求结果消息
+            RequestResult* result = reinterpret_cast<RequestResult*>(wParam);
+            if (result) {
+                instance->handleRequestResult(*result);
+                delete result;  // 删除创建的请求结果对象
+            }
+            return 0;
         } else if (uMsg == WM_TIMER && wParam == UPDATE_TIMER_ID) {
             if (instance->tester.isTestRunning()) {
                 instance->updateStatus(
@@ -342,6 +711,13 @@ LRESULT CALLBACK UIManager::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPAR
                 instance->showTestResults();
             }
             return 0;
+        } else if (uMsg == WM_DRAWITEM) {
+            // 处理自定义绘制
+            DRAWITEMSTRUCT* pDIS = (DRAWITEMSTRUCT*)lParam;
+            if (pDIS->hwndItem == instance->hwndChartStatic) {
+                instance->drawChart(pDIS->hDC);
+                return TRUE;
+            }
         }
     }
 
@@ -352,6 +728,40 @@ LRESULT CALLBACK UIManager::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPAR
     }
 
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+LRESULT CALLBACK UIManager::LogDialogProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+        case WM_INITDIALOG:
+            return TRUE;
+
+        case WM_COMMAND:
+            if (LOWORD(wParam) == ID_LOG_CLOSE || LOWORD(wParam) == IDCANCEL) {
+                EndDialog(hwnd, 0);
+                return TRUE;
+            }
+            break;
+
+        case WM_CLOSE:
+            EndDialog(hwnd, 0);
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+void UIManager::handleRequestResult(const RequestResult& result) {
+    // 更新请求列表视图
+    updateListView(result);
+
+    // 如果这是第一个请求，立即更新状态
+    if (result.id == 1) {
+        updateStatus(
+            tester.getCompletedRequests(),
+            tester.getTotalRequests(),
+            tester.getSuccessRate()
+        );
+    }
 }
 
 LRESULT UIManager::handleCommand(WPARAM wParam, LPARAM lParam) {
@@ -365,6 +775,10 @@ LRESULT UIManager::handleCommand(WPARAM wParam, LPARAM lParam) {
 
         case ID_STOP_BUTTON:
             handleStopTest();
+            return 0;
+
+        case ID_VIEW_LOG_BUTTON:
+            handleViewLog();
             return 0;
 
         case ID_EXIT_BUTTON:
@@ -433,7 +847,7 @@ void UIManager::handleStartTest() {
     // 获取URL
     GetWindowTextW(hwndUrlCombo, buffer, 1024);
     std::wstring wUrl(buffer);
-    std::string url(wUrl.begin(), wUrl.end());
+    std::string url = wstringToString(wUrl);  // 使用安全转换
 
     // 获取线程数
     GetWindowTextW(hwndThreadsEdit, buffer, 1024);
@@ -448,7 +862,15 @@ void UIManager::handleStartTest() {
     // 获取日志文件路径
     GetWindowTextW(hwndLogFileEdit, buffer, 1024);
     std::wstring wLogFile(buffer);
-    std::string logFile(wLogFile.begin(), wLogFile.end());
+    std::string logFile = wstringToString(wLogFile);  // 使用安全转换
+    currentLogFile = logFile;  // 保存当前日志文件路径
+
+    // 清空列表视图
+    {
+        std::lock_guard<std::mutex> lock(requestsMutex);
+        recentRequests.clear();
+    }
+    ListView_DeleteAllItems(hwndRequestListView);
 
     // 保存配置
     AppConfig& config = AppConfig::getInstance();
@@ -474,17 +896,113 @@ void UIManager::handleStartTest() {
     }
 }
 
+
 void UIManager::handleStopTest() {
     // 创建一个线程来停止测试，以避免UI冻结
     std::thread([this]() {
         tester.stop();
 
         // 发送消息通知主线程更新UI
-        PostMessage(hwndMain, WM_USER + 1, 0, 0);
+        PostMessage(hwndMain, WM_USER + 2, 0, 0);
     }).detach();
 
     // 立即禁用停止按钮
     EnableWindow(hwndStopButton, FALSE);
+}
+
+void UIManager::handleViewLog() {
+    // 检查日志文件是否存在
+    wchar_t buffer[1024];
+    GetWindowTextW(hwndLogFileEdit, buffer, 1024);
+    std::wstring wLogFile(buffer);
+    std::string logFile(wLogFile.begin(), wLogFile.end());
+
+    std::ifstream file(logFile);
+    if (!file.is_open()) {
+        MessageBoxW(hwndMain, L"无法打开日志文件，请确认文件存在且可访问。", L"错误", MB_ICONERROR);
+        return;
+    }
+    file.close();
+
+    // 读取日志内容
+    std::string logContent = LoadTester::readLogFile(logFile);
+
+    // 创建并显示日志对话框
+    showLogDialog();
+}
+
+void UIManager::showLogDialog() {
+    // 创建对话框模板
+    DLGTEMPLATE dlgTemplate;
+    ZeroMemory(&dlgTemplate, sizeof(DLGTEMPLATE));
+    dlgTemplate.style = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME;
+    dlgTemplate.cx = 500;
+    dlgTemplate.cy = 350;
+    dlgTemplate.cdit = 2;  // 两个控件：编辑框和按钮
+
+    // 创建对话框
+    HWND hLogDialog = CreateDialogIndirectW(
+        hInstance,
+        &dlgTemplate,
+        hwndMain,
+        LogDialogProc
+    );
+
+    if (!hLogDialog) {
+        MessageBoxW(hwndMain, L"创建日志对话框失败。", L"错误", MB_ICONERROR);
+        return;
+    }
+
+    // 设置对话框标题
+    SetWindowTextW(hLogDialog, L"查看日志");
+
+    // 获取对话框客户区大小
+    RECT rect;
+    GetClientRect(hLogDialog, &rect);
+    int width = rect.right - rect.left;
+    int height = rect.bottom - rect.top;
+
+    // 创建富文本编辑框控件
+    HWND hLogEdit = CreateWindowExW(
+        0, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | ES_AUTOHSCROLL,
+        10, 10, width - 20, height - 50,
+        hLogDialog, (HMENU)ID_LOG_EDIT, hInstance, NULL
+    );
+
+    // 创建关闭按钮
+    HWND hCloseButton = CreateWindowW(
+        L"BUTTON", L"关闭",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        width / 2 - 40, height - 35, 80, 25,
+        hLogDialog, (HMENU)ID_LOG_CLOSE, hInstance, NULL
+    );
+
+    // 设置字体
+    HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    SendMessage(hLogEdit, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(TRUE, 0));
+    SendMessage(hCloseButton, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(TRUE, 0));
+
+    // 读取日志内容
+    std::string logContent = LoadTester::readLogFile(currentLogFile);
+
+    // 将内容转换为宽字符 - 使用安全转换
+    std::wstring wLogContent = stringToWstring(logContent);
+
+    // 设置文本
+    SetWindowTextW(hLogEdit, wLogContent.c_str());
+
+    // 显示对话框
+    ShowWindow(hLogDialog, SW_SHOW);
+
+    // 模态对话框消息循环
+    MSG msg;
+    while (GetMessage(&msg, NULL, 0, 0)) {
+        if (!IsDialogMessage(hLogDialog, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+    }
 }
 
 void UIManager::handleExit() {
@@ -502,7 +1020,6 @@ void UIManager::handleExit() {
     // 销毁窗口
     DestroyWindow(hwndMain);
 }
-
 void UIManager::showTestResults() {
     // 更新状态标签
     SetWindowTextW(hwndStatusLabel, L"测试完成");
@@ -521,6 +1038,25 @@ void UIManager::showTestResults() {
 
     // 进度条设置为100%
     SendMessage(hwndProgressBar, PBM_SETPOS, 100, 0);
+
+    // 更新图表
+    InvalidateRect(hwndChartStatic, NULL, TRUE);
+
+    // 完成测试后展示总体结果对话框
+    std::wstringstream resultMsg;
+    resultMsg << L"测试完成!\n\n";
+    resultMsg << L"总请求数: " << tester.getTotalRequests() << L"\n";
+    resultMsg << L"完成请求数: " << tester.getCompletedRequests() << L"\n";
+    resultMsg << L"成功请求数: " << tester.getSuccessfulRequests() << L"\n";
+    resultMsg << L"成功率: " << std::fixed << std::setprecision(2) << tester.getSuccessRate() << L"%\n\n";
+    resultMsg << L"响应时间统计:\n";
+    resultMsg << L"  最小: " << std::fixed << std::setprecision(2) << tester.getMinResponseTime() << L" ms\n";
+    resultMsg << L"  最大: " << std::fixed << std::setprecision(2) << tester.getMaxResponseTime() << L" ms\n";
+    resultMsg << L"  平均: " << std::fixed << std::setprecision(2) << tester.getAvgResponseTime() << L" ms\n\n";
+    // 修复引号问题
+    resultMsg << L"您可以通过点击\"查看日志\"按钮查看详细日志。";
+
+    MessageBoxW(hwndMain, resultMsg.str().c_str(), L"测试结果", MB_ICONINFORMATION);
 }
 
 void UIManager::updateControlsState(bool testRunning) {
@@ -532,8 +1068,10 @@ void UIManager::updateControlsState(bool testRunning) {
     EnableWindow(GetDlgItem(hwndMain, ID_BROWSE_BUTTON), !testRunning);
     EnableWindow(hwndStartButton, !testRunning);
     EnableWindow(hwndStopButton, testRunning);
+    EnableWindow(hwndViewLogButton, !testRunning);
 }
 
+// 替换saveCurrentConfig函数中的字符串转换
 void UIManager::saveCurrentConfig() {
     AppConfig& config = AppConfig::getInstance();
 
@@ -544,12 +1082,11 @@ void UIManager::saveCurrentConfig() {
 
     // 配置文件完整路径
     std::wstring configFilePath = std::wstring(documentsPath) + L"\\CppLoadTester.cfg";
-    std::string configFile(configFilePath.begin(), configFilePath.end());
+    std::string configFile = wstringToString(configFilePath);  // 使用安全转换
 
     // 保存配置
     config.saveToFile(configFile);
 }
-
 void UIManager::loadSavedConfig() {
     AppConfig& config = AppConfig::getInstance();
 
@@ -560,19 +1097,20 @@ void UIManager::loadSavedConfig() {
 
     // 配置文件完整路径
     std::wstring configFilePath = std::wstring(documentsPath) + L"\\CppLoadTester.cfg";
-    std::string configFile(configFilePath.begin(), configFilePath.end());
+    std::string configFile = wstringToString(configFilePath);  // 使用安全转换
 
     // 加载配置
     if (config.loadFromFile(configFile)) {
-        // 设置默认值
-        std::wstring wUrl = std::wstring(config.getString("DefaultURL").begin(), config.getString("DefaultURL").end());
+        // 设置默认值 - 使用安全转换
+        std::wstring wUrl = stringToWstring(config.getString("DefaultURL"));
         SetWindowTextW(hwndUrlCombo, wUrl.c_str());
 
         SetWindowTextW(hwndThreadsEdit, std::to_wstring(config.getInt("DefaultThreads")).c_str());
         SetWindowTextW(hwndRequestsEdit, std::to_wstring(config.getInt("DefaultRequests")).c_str());
 
-        std::wstring wLogFile = std::wstring(config.getString("DefaultLogFile").begin(), config.getString("DefaultLogFile").end());
+        std::wstring wLogFile = stringToWstring(config.getString("DefaultLogFile"));
         SetWindowTextW(hwndLogFileEdit, wLogFile.c_str());
+        currentLogFile = config.getString("DefaultLogFile");
 
         // 添加最近URLs到下拉框
         for (const auto& url : config.getRecentUrls()) {
@@ -581,9 +1119,10 @@ void UIManager::loadSavedConfig() {
     }
 }
 
+
 void UIManager::addUrlToComboBox(const std::string& url) {
-    // 转换为宽字符
-    std::wstring wUrl(url.begin(), url.end());
+    // 转换为宽字符 - 使用安全转换
+    std::wstring wUrl = stringToWstring(url);
 
     // 检查是否已经在列表中
     int count = ComboBox_GetCount(hwndUrlCombo);

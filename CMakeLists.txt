@@ -30,6 +30,7 @@ set(HEADERS
         include/LoadTester.h
         include/AppConfig.h
         include/UIManager.h
+        include/StringConversion.h
 )
 
 # 添加包含目录
@@ -67,7 +68,9 @@ endif()
 
 # 设置输出目录
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-
+if(MINGW)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++")
+endif()
 # 安装指令
 install(TARGETS CppLoadTester DESTINATION bin)
 

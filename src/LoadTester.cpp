@@ -7,12 +7,14 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <fstream>
 #include <curl/curl.h>
 
 LoadTester::LoadTester()
     : isRunning(false),
       completedRequests(0),
       successfulRequests(0),
+      requestIdCounter(0),
       minResponseTime(0),
       maxResponseTime(0),
       avgResponseTime(0) {
@@ -28,12 +30,18 @@ bool LoadTester::start(const std::string& testUrl, int threadCount, int requests
     if (isRunning) return false;
 
     url = testUrl;
-    numThreads = threadCount;  // 修改变量名，避免和成员变量冲突
+    numThreads = threadCount;
     totalRequests = requests;
     completedRequests = 0;
     successfulRequests = 0;
+    requestIdCounter = 0;
     isRunning = true;
     responseTimes.clear();
+
+    {
+        std::lock_guard<std::mutex> lock(historyMutex);
+        requestHistory.clear();
+    }
 
     // 初始化curl
     curl_global_init(CURL_GLOBAL_ALL);
@@ -116,6 +124,27 @@ void LoadTester::setStatusCallback(std::function<void(int, int, double)> callbac
     statusCallback = callback;
 }
 
+void LoadTester::setRequestCallback(std::function<void(const RequestResult&)> callback) {
+    requestCallback = callback;
+}
+
+std::vector<RequestResult> LoadTester::getRecentResults(int count) const {
+    std::lock_guard<std::mutex> lock(historyMutex);
+    std::vector<RequestResult> results;
+
+    // 取最近的count个结果
+    int resultCount = std::min(count, static_cast<int>(requestHistory.size()));
+    results.reserve(resultCount);
+
+    // 从最新的开始复制
+    auto it = requestHistory.begin();
+    for (int i = 0; i < resultCount; ++i, ++it) {
+        results.push_back(*it);
+    }
+
+    return results;
+}
+
 double LoadTester::getMinResponseTime() const {
     return minResponseTime;
 }
@@ -126,6 +155,22 @@ double LoadTester::getMaxResponseTime() const {
 
 double LoadTester::getAvgResponseTime() const {
     return avgResponseTime;
+}
+
+std::vector<double> LoadTester::getResponseTimes() const {
+    std::lock_guard<std::mutex> lock(responseTimesMutex);
+    return responseTimes;
+}
+
+std::string LoadTester::readLogFile(const std::string& logFilePath) {
+    std::ifstream file(logFilePath);
+    if (!file.is_open()) {
+        return "无法打开日志文件: " + logFilePath;
+    }
+
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
 }
 
 size_t LoadTester::WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
@@ -147,10 +192,27 @@ void LoadTester::log(const std::string& message) {
     std::cout << ss.str() << std::endl;
 }
 
-void LoadTester::makeRequest() {
+void LoadTester::addResult(const RequestResult& result) {
+    std::lock_guard<std::mutex> lock(historyMutex);
+    // 添加到队列前面（最新的在前）
+    requestHistory.push_front(result);
+
+    // 限制历史记录大小
+    if (requestHistory.size() > MAX_HISTORY_SIZE) {
+        requestHistory.pop_back();
+    }
+
+    // 如果有回调，通知UI
+    if (requestCallback) {
+        requestCallback(result);
+    }
+}
+
+RequestResult LoadTester::makeRequest() {
     CURL* curl;
     CURLcode res;
     std::string readBuffer;
+    int requestId = ++requestIdCounter;
 
     curl = curl_easy_init();
     if (curl) {
@@ -173,32 +235,48 @@ void LoadTester::makeRequest() {
 
         completedRequests++;
 
+        RequestResult result(requestId, RequestStatus::REQ_ERROR, 0, url, elapsed);
+
         if (res == CURLE_OK) {
             long response_code;
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+            result.statusCode = static_cast<int>(response_code);
 
             if (response_code >= 200 && response_code < 300) {
                 successfulRequests++;
+                result.status = RequestStatus::SUCCESS;
                 log("请求成功: HTTP " + std::to_string(response_code) + " (" + std::to_string(elapsed) + " 毫秒)");
             } else {
+                result.status = RequestStatus::FAILED;
                 log("请求失败: HTTP " + std::to_string(response_code) + " (" + std::to_string(elapsed) + " 毫秒)");
             }
         } else {
-            log("请求失败: " + std::string(curl_easy_strerror(res)) + " (" + std::to_string(elapsed) + " 毫秒)");
+            result.errorMessage = curl_easy_strerror(res);
+            log("请求错误: " + result.errorMessage + " (" + std::to_string(elapsed) + " 毫秒)");
         }
 
         curl_easy_cleanup(curl);
+
+        // 添加到历史记录
+        addResult(result);
+
+        return result;
     }
 
-    // 如果有状态回调，则调用它
-    if (statusCallback) {
-        statusCallback(completedRequests, totalRequests, getSuccessRate());
-    }
+    // 如果curl初始化失败
+    RequestResult errorResult(requestId, RequestStatus::REQ_ERROR, 0, url, 0, "CURL初始化失败");
+    addResult(errorResult);
+    return errorResult;
 }
 
 void LoadTester::workerThread() {
     while (isRunning && completedRequests < totalRequests) {
-        makeRequest();
+        RequestResult result = makeRequest();
+
+        // 如果有状态回调，则调用它
+        if (statusCallback) {
+            statusCallback(completedRequests, totalRequests, getSuccessRate());
+        }
 
         // 小延迟，防止目标服务器过载
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
