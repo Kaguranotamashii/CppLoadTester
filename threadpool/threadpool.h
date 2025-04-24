@@ -1,7 +1,7 @@
-/*  文件说明：
+/*  文件说明:
  *  1. 用于创建线程池
- *  2. 每个线程中等待事件队列中添加新事件（EventBase 指针指向的派生类）
- *  3. 有新事件时，分配给一个线程处理，线程中调用事件的 process() 方法处理该事件
+ *  2. 每个线程中等待事件队列中添加新事件(EventBase 指针指向的派生类)
+ *  3. 有新事件时,分配给一个线程处理,线程中调用事件的 process() 方法处理该事件
  */
 #ifndef THREADPOOL_H
 #define THREADPOOL_H
@@ -20,11 +20,11 @@ public:
     ThreadPool(int threadNum);
     ~ThreadPool();
 public:
-    // 向事件队列中添加一个待处理的事件，线程池中的线程会循环处理其中的事件
+    // 向事件队列中添加一个待处理的事件,线程池中的线程会循环处理其中的事件
     int appendEvent(EventBase* event, const std::string eventType);
 
 private:
-    // 创建线程时指定的运行函数，参数传递 this，实现在子线程中可以访问到该对象的成员
+    // 创建线程时指定的运行函数,参数传递 this,实现在子线程中可以访问到该对象的成员
     static void *worker(void *arg);
     
     // 在线程中执行该函数等待处理事件队列中的事件
@@ -42,3 +42,5 @@ private:
 
 
 #endif
+
+

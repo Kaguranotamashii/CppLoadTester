@@ -54,7 +54,7 @@ int ThreadPool::appendEvent(EventBase* event, const std::string eventType){
     }
     // 向队列中添加事件
     m_workQueue.push(event);
-    std::cout << outHead("info") << eventType << "添加成功，线程池事件队列中剩余的事件个数：" << m_workQueue.size() << std::endl;
+    std::cout << outHead("info") << eventType << "添加成功,线程池事件队列中剩余的事件个数:" << m_workQueue.size() << std::endl;
     // 事件队列解锁
     pthread_mutex_unlock(&queueLocker);
     if(ret != 0){

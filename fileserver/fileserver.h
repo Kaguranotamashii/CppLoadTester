@@ -13,7 +13,7 @@ class WebServer{
 public:
     WebServer();
     
-    // 创建套接字等待客户端连接，并开启监听
+    // 创建套接字等待客户端连接,并开启监听
     int createListenFd(int port, const char* ip = nullptr );
     
     // 创建 epoll 例程用于监听套接字

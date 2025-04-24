@@ -1,6 +1,6 @@
 #include "utils.h"
 
-// 以 "09:50:19.0619 2022-09-26 [logType]: " 格式返回当前的时间和输出类型，logType 指定输出的类型：
+// 以 "09:50:19.0619 2022-09-26 [logType]: " 格式返回当前的时间和输出类型,logType 指定输出的类型:
 // init  : 表示服务器的初始化过程
 // error : 表示服务器运行中的出错消息
 // info  : 表示程序的运行信息
@@ -34,7 +34,7 @@ std::string outHead(const std::string logType){
 }
 
 
-// 向 epollfd 添加文件描述符，并指定监听事件。edgeTrigger：边缘触发，isOneshot：EPOLLONESHOT
+// 向 epollfd 添加文件描述符,并指定监听事件.edgeTrigger:边缘触发,isOneshot:EPOLLONESHOT
 int addWaitFd(int epollFd, int newFd, bool edgeTrigger, bool isOneshot){
     epoll_event event;
     event.data.fd = newFd;
@@ -55,7 +55,7 @@ int addWaitFd(int epollFd, int newFd, bool edgeTrigger, bool isOneshot){
     return 0;
 }
 
-// 修改正在监听文件描述符的事件。edgeTrigger:是否为边沿触发，resetOneshot:是否设置 EPOLLONESHOT，addEpollout:是否监听输出事件
+// 修改正在监听文件描述符的事件.edgeTrigger:是否为边沿触发,resetOneshot:是否设置 EPOLLONESHOT,addEpollout:是否监听输出事件
 int modifyWaitFd(int epollFd, int modFd, bool edgeTrigger, bool resetOneshot, bool addEpollout){
     epoll_event event;
     event.data.fd = modFd;

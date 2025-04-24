@@ -7,7 +7,7 @@ WebServer::~WebServer(){
 
 }
 
-// 创建套接字等待客户端连接，并开启监听
+// 创建套接字等待客户端连接,并开启监听
 int WebServer::createListenFd(int port, const char* ip){
     // 指定地址
     bzero(&m_serverAddr, sizeof(m_serverAddr));
@@ -68,7 +68,7 @@ int WebServer::createEpoll(){
 int WebServer::epollAddListenFd(){
     // ListenFd 设置为 边沿触发、非阻塞
     setNonBlocking(m_listenfd);
-    // 因为需要将连接客户端的任务交给子线程处理，所以设置为边沿触发，避免子线程还没有接受连接时事件一直产生
+    // 因为需要将连接客户端的任务交给子线程处理,所以设置为边沿触发,避免子线程还没有接受连接时事件一直产生
     int ret = addWaitFd(m_epollfd, m_listenfd, true, false);
     if(ret != 0){
         std::cout << outHead("error") << "添加监控 Listen 套接字失败" << std::endl;
@@ -107,7 +107,7 @@ int WebServer::epollAddEventPipe(){
 // 设置term和alarm信号的处理
 int WebServer::addHandleSig(int signo){
     int ret = 0;
-    // 当参数 signo 为 -1 时，表示添加对默认信号的处理
+    // 当参数 signo 为 -1 时,表示添加对默认信号的处理
     if(signo == -1){
         // 处理 SIGINT 信号
         struct sigaction actINT;
@@ -142,7 +142,7 @@ int WebServer::addHandleSig(int signo){
         return 0;
     }
 
-    // 参数 signo 不为 -1 时，表示添加监听的信号
+    // 参数 signo 不为 -1 时,表示添加监听的信号
     struct sigaction act;
     act.sa_handler = setSigHandler;
     sigfillset(&act.sa_mask);
@@ -181,7 +181,7 @@ int WebServer::waitEpoll(){
 
     while(!isStop){
         int resNum = epoll_wait(m_epollfd, resEvents, MAX_RESEVENT_SIZE, -1);
-        // 如果 epoll_wait 执行出错，直接退出（因为事件发生导致返回 -1 时，errno会置 ENITR，需要在事件处理函数中保留 errno）
+        // 如果 epoll_wait 执行出错,直接退出(因为事件发生导致返回 -1 时,errno会置 ENITR,需要在事件处理函数中保留 errno)
         if(resNum < 0 && errno != EINTR ){
             std::cout << outHead("error") << "epoll_wait 执行错误" << std::endl;
             return -1;
@@ -195,7 +195,7 @@ int WebServer::waitEpoll(){
                 event = new AcceptConn(m_listenfd, m_epollfd);
                 eventType = "新连接事件";
             }else if((resfd == eventHandlerPipe[0]) && (resEvents[i].events & EPOLLIN)){
-                // 如果有事件发生，执行事件处理函数
+                // 如果有事件发生,执行事件处理函数
                 
                 eventType = "新信号事件";
             }else if(resEvents[i].events & EPOLLIN){
@@ -204,14 +204,14 @@ int WebServer::waitEpoll(){
                 eventType = "新可读事件";
 
             }else if(resEvents[i].events & EPOLLOUT){
-                // 套接字可以发送数据，构建可以发送数据的事件
+                // 套接字可以发送数据,构建可以发送数据的事件
                 event = new HandleSend(resEvents[i].data.fd, m_epollfd);
                 eventType = "新可写事件";
             }
             if(event == nullptr){
                 continue;
             }
-            // 将事件加入线程池的待处理队列。在线程池中，事件执行完后销毁事件，可以修改为智能指针自动释放
+            // 将事件加入线程池的待处理队列.在线程池中,事件执行完后销毁事件,可以修改为智能指针自动释放
             threadPool->appendEvent(event, eventType);
             
             // 将 event 置空
